@@ -1,9 +1,9 @@
 name: Scrap Tiket Pesawat
 
 on:
-  # Otomatis setiap hari jam 08:00 WIB (01:00 UTC)
+  # Otomatis setiap Senin jam 08:00 WIB (01:00 UTC)
   schedule:
-    - cron: "0 1 * * *"
+    - cron: "0 1 * * 1"
 
   # Manual — tombol "Run workflow" di GitHub
   workflow_dispatch:

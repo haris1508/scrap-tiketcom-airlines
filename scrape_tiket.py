@@ -31,8 +31,8 @@ ROUTES = {
     "KUL": {"code": "KUL",   "type": "AIRPORT", "label": "Kuala-Lumpur"},
 }
 
-# H+1 sampai H+60 dari hari scraping dijalankan
-DAYS_AHEAD = list(range(1, 61))
+# Setiap Jumat dari H+4 sampai ~3 bulan ke depan (H+4, H+11, ..., H+88)
+DAYS_AHEAD = list(range(4, 89, 7))
 
 OUTPUT_DIR = Path(__file__).parent / "hasil_scraping"
 

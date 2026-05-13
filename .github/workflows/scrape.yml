@@ -35,13 +35,18 @@ jobs:
           retry_wait_seconds: 30
           command: python scrape_tiket.py
 
-      - name: Upload hasil Excel
-        if: always()   # upload meski ada error, supaya data parsial tetap tersimpan
-        uses: actions/upload-artifact@v4
-        with:
-          name: hasil-scraping-${{ github.run_id }}
-          path: hasil_scraping/*.xlsx
-          retention-days: 90
+      - name: Commit & push file Excel ke repo
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add hasil_scraping/*.xlsx 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "Tidak ada file baru untuk di-commit."
+          else
+            git commit -m "Data: $(date +'%y%m%d')-Scrap Tiket Pesawat.xlsx"
+            git push
+          fi
 
       - name: Tampilkan summary di GitHub Actions
         if: always()
@@ -49,9 +54,7 @@ jobs:
           echo "## 📊 Scrap Tiket Pesawat — $(date +'%d %b %Y')" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if ls hasil_scraping/*.xlsx 1> /dev/null 2>&1; then
-            echo "✅ File Excel berhasil dibuat" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "📥 Download di tab **Artifacts** di halaman ini." >> $GITHUB_STEP_SUMMARY
+            echo "✅ File Excel berhasil dibuat dan tersimpan di repo." >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Tidak ada file Excel yang dihasilkan." >> $GITHUB_STEP_SUMMARY
           fi

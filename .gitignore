@@ -3,8 +3,8 @@
 __pycache__/
 *.pyc
 
-# Output scraping (tidak di-commit ke repo)
-hasil_scraping/
+# Output scraping — hanya abaikan file sementara
+hasil_scraping/*.csv
 
 # Log
 scraper.log

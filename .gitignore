@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Output scraping (tidak di-commit ke repo)
+hasil_scraping/
+
+# Log
+scraper.log
+
+# macOS
+.DS_Store

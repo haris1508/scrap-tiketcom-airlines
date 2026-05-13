@@ -1,0 +1,38 @@
+name: Scrap Tiket Pesawat
+
+on:
+  # Otomatis setiap hari jam 08:00 WIB (01:00 UTC)
+  schedule:
+    - cron: "0 1 * * *"
+
+  # Manual — tombol "Run workflow" di GitHub
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Jalankan scraper
+        run: python scrape_tiket.py
+
+      - name: Upload hasil Excel
+        uses: actions/upload-artifact@v4
+        with:
+          name: hasil-scraping-${{ github.run_id }}
+          path: hasil_scraping/*.xlsx
+          retention-days: 90

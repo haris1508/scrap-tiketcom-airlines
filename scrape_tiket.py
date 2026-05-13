@@ -8,12 +8,14 @@ Output  : Excel di folder hasil_scraping/
 """
 
 import asyncio
+import random
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async
 
 # ---------------------------------------------------------------------------
 # Konfigurasi rute
@@ -31,9 +33,26 @@ ROUTES = {
 }
 
 # Setiap Jumat: H+4, H+11, H+18, ..., H+88 (~3 bulan)
-DAYS_AHEAD  = list(range(4, 89, 7))
-MAX_RETRY   = 3          # maksimal percobaan per rute/tanggal
-OUTPUT_DIR  = Path(__file__).parent / "hasil_scraping"
+DAYS_AHEAD    = list(range(4, 89, 7))
+MAX_RETRY     = 3       # maksimal percobaan per rute/tanggal
+RESTART_EVERY = 8       # restart browser setiap N halaman
+OUTPUT_DIR    = Path(__file__).parent / "hasil_scraping"
+
+# Daftar user agent untuk dirotasi
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+]
+
+VIEWPORTS = [
+    {"width": 1440, "height": 900},
+    {"width": 1920, "height": 1080},
+    {"width": 1366, "height": 768},
+    {"width": 1536, "height": 864},
+]
 
 
 def build_url(dest_info: dict, date_str: str) -> str:
@@ -47,19 +66,45 @@ def build_url(dest_info: dict, date_str: str) -> str:
     )
 
 
+async def new_context(browser):
+    """Buat context baru dengan user agent & viewport random."""
+    ua       = random.choice(USER_AGENTS)
+    viewport = random.choice(VIEWPORTS)
+    ctx = await browser.new_context(
+        user_agent=ua,
+        viewport=viewport,
+        locale="id-ID",
+        timezone_id="Asia/Jakarta",
+        extra_http_headers={
+            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            "sec-ch-ua-platform": '"Windows"',
+        },
+    )
+    page = await ctx.new_page()
+    await stealth_async(page)
+
+    # Kunjungi homepage dulu agar terlihat seperti user biasa
+    await page.goto("https://www.tiket.com/id-id/flights", wait_until="domcontentloaded", timeout=30_000)
+    await page.wait_for_timeout(random.randint(2000, 4000))
+
+    return ctx, page
+
+
 async def scrape_page(page, url: str, dest_code: str, date_str: str, days: int) -> list[dict]:
     """Navigate ke URL dan ekstrak semua data penerbangan."""
     await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
 
     try:
-        await page.wait_for_selector('[class*="FlightCard_card__"]', timeout=30_000)
+        await page.wait_for_selector('[class*="FlightCard_card__"]', timeout=35_000)
     except Exception:
         raise RuntimeError(f"Tidak ada hasil: {dest_code} {date_str}")
 
-    # Scroll agar semua card ter-load
+    # Scroll human-like
     for _ in range(5):
         await page.keyboard.press("End")
-        await page.wait_for_timeout(800)
+        await page.wait_for_timeout(random.randint(600, 1200))
 
     flights = await page.evaluate("""
         () => {
@@ -129,10 +174,11 @@ async def scrape_with_retry(page, url, dest_code, date_str, days) -> tuple[list,
         try:
             flights = await scrape_page(page, url, dest_code, date_str, days)
             return flights, True
-        except Exception as exc:
+        except Exception:
             if attempt < MAX_RETRY:
-                print(f"⚠ retry {attempt}/{MAX_RETRY-1}... ", end="", flush=True)
-                await asyncio.sleep(3 * attempt)   # backoff
+                wait = random.randint(5, 10) * attempt
+                print(f"⚠ retry {attempt}/{MAX_RETRY-1} (tunggu {wait}s)... ", end="", flush=True)
+                await asyncio.sleep(wait)
             else:
                 return [], False
     return [], False
@@ -147,30 +193,35 @@ async def main():
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     all_flights: list[dict] = []
-
-    # Tracking sukses/gagal
     results_log: list[dict] = []
+    page_count = 0
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"],
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+            ],
         )
-        ctx = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1440, "height": 900},
-            locale="id-ID",
-        )
-        page = await ctx.new_page()
+
+        ctx, page = await new_context(browser)
 
         for dest_code, dest_info in ROUTES.items():
             print(f"🛫  Jakarta → {dest_code} ({dest_info['label']})")
 
             for days in DAYS_AHEAD:
+                # Restart browser setiap RESTART_EVERY halaman
+                if page_count > 0 and page_count % RESTART_EVERY == 0:
+                    print(f"\n  🔄 Restart browser (halaman ke-{page_count})...")
+                    await ctx.close()
+                    await asyncio.sleep(random.randint(5, 10))
+                    ctx, page = await new_context(browser)
+                    print()
+
                 travel_date = today + timedelta(days=days)
                 date_str    = travel_date.strftime("%Y-%m-%d")
                 url         = build_url(dest_info, date_str)
@@ -178,6 +229,7 @@ async def main():
                 print(f"    📅 H+{days:2d}  ({date_str}) ... ", end="", flush=True)
 
                 flights, ok = await scrape_with_retry(page, url, dest_code, date_str, days)
+                page_count += 1
 
                 if ok:
                     all_flights.extend(flights)
@@ -193,18 +245,20 @@ async def main():
                     "jumlah"     : len(flights),
                 })
 
-                await asyncio.sleep(2)
+                # Delay random antar request (lebih human-like)
+                await asyncio.sleep(random.uniform(4, 8))
 
             print()
 
+        await ctx.close()
         await browser.close()
 
     # ---------------------------------------------------------------------------
     # Summary
     # ---------------------------------------------------------------------------
-    total      = len(results_log)
-    sukses     = sum(1 for r in results_log if "OK" in r["status"])
-    gagal      = total - sukses
+    total  = len(results_log)
+    sukses = sum(1 for r in results_log if "OK" in r["status"])
+    gagal  = total - sukses
 
     print(f"\n{'='*60}")
     print(f"  SUMMARY")
@@ -224,7 +278,7 @@ async def main():
     # ---------------------------------------------------------------------------
     if not all_flights:
         print("⚠  Tidak ada data yang berhasil di-scrape.")
-        sys.exit(1)   # exit code 1 agar GitHub Actions tandai sebagai gagal
+        sys.exit(1)
 
     df = pd.DataFrame(all_flights)
 
@@ -251,14 +305,11 @@ async def main():
         df.to_excel(writer, index=False, sheet_name="Semua Rute")
         for dest in df["destination"].unique():
             df[df["destination"] == dest].to_excel(writer, index=False, sheet_name=dest)
-
-        # Sheet summary
         pd.DataFrame(results_log).to_excel(writer, index=False, sheet_name="Summary")
 
     print(f"✅  Total data   : {len(df)} baris")
     print(f"📊  Excel        : {excel_path}\n")
 
-    # Exit code 1 kalau ada yang gagal, supaya GitHub Actions kirim notif
     if gagal > 0:
         sys.exit(1)
 

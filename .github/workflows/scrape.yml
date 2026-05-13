@@ -1,11 +1,8 @@
 name: Scrap Tiket Pesawat
 
 on:
-  # Otomatis setiap Senin jam 08:00 WIB (01:00 UTC)
-  schedule:
-    - cron: "0 1 * * 1"
-
-  # Manual — tombol "Run workflow" di GitHub
+  # Jadwal dinonaktifkan — scraper dijalankan lokal via Claude scheduled agent
+  # Manual trigger tetap tersedia jika dibutuhkan
   workflow_dispatch:
 
 jobs:

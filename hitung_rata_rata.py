@@ -18,6 +18,10 @@ DOMESTIK = {"BPN", "DPS", "KNO", "MES", "PKU", "SUB", "UPG", "YIA", "JOG"}
 # Mapping nama bandara ke kota (untuk normalisasi)
 NORMALISASI = {"MES": "KNO", "JOG": "YIA"}
 
+# Jarak great-circle (km) Jakarta (CGK) → bandara tujuan, untuk hitung Rp/km
+JARAK_KM = {"BPN": 1258, "DPS": 983, "KNO": 1387, "PKU": 933,
+            "SUB": 691, "UPG": 1432, "YIA": 424}
+
 
 def parse_traveloka(path: Path) -> pd.DataFrame:
     """Parse format CSV Traveloka — auto-detect separator & format tanggal."""
@@ -150,6 +154,19 @@ long_avg = (
     .reset_index()
 )
 
+# Rp/km flight-level (sadar-volume): tiap penerbangan = harga ÷ jarak rute,
+# lalu dirata-rata per bulan (rute ramai berpengaruh lebih besar)
+df["rp_per_km"] = df["harga"] / df["destinasi"].map(JARAK_KM)
+rpkm_bulan = (
+    df.dropna(subset=["rp_per_km"])
+    .groupby("bulan")
+    .agg(rata_rata_rp_per_km=("rp_per_km", "mean"),
+         jumlah_data        =("rp_per_km", "size"))
+    .round({"rata_rata_rp_per_km": 0})
+    .astype({"rata_rata_rp_per_km": "Int64"})
+    .reset_index()
+)
+
 # -----------------------------------------------------------------------------
 # Output
 # -----------------------------------------------------------------------------
@@ -161,10 +178,13 @@ with pd.ExcelWriter(excel_path, engine="openpyxl") as w:
     pivot.to_excel(w, sheet_name="Pivot Bulan x Rute")
     long_avg.to_excel(w, sheet_name="Detail per Bulan-Rute", index=False)
     jumlah_per_bulan.to_excel(w, sheet_name="Jumlah Data per Bulan")
+    rpkm_bulan.to_excel(w, sheet_name="Rp per km per Bulan", index=False)
 
 long_avg.to_csv(csv_path, index=False, encoding="utf-8-sig")
 
 print(f"\n📊 Pivot tabel (Rp):")
 print(pivot.to_string())
+print(f"\n📏 Rata-rata Rp/km per bulan (sadar-volume):")
+print(rpkm_bulan.tail(12).to_string(index=False))
 print(f"\n✅ Excel : {excel_path}")
 print(f"✅ CSV   : {csv_path}")

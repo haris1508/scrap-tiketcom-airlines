@@ -82,11 +82,10 @@ async def scrape_page(page, url: str, dest_code: str, date_str: str, days: int) 
     except Exception:
         raise RuntimeError(f"Tidak ada hasil: {dest_code} {date_str}")
 
-    for _ in range(5):
-        await page.keyboard.press("End")
-        await page.wait_for_timeout(800)
-
-    flights = await page.evaluate("""
+    # tiket.com kini pakai virtual scrolling: DOM hanya menyimpan ~12 kartu yang
+    # terlihat & me-recycle saat scroll. Jadi kita scroll bertahap sambil memanen
+    # + dedup, bukan "scroll ke bawah lalu baca sekali" (cara lama cuma dapat ~12).
+    parse_js = """
         () => {
             // tiket.com memakai CSS-module hashed: cocokkan PREFIX class yang stabil
             // (suffix hash mis. __FFuMp berubah tiap deploy, jadi jangan diandalkan).
@@ -152,7 +151,28 @@ async def scrape_page(page, url: str, dest_code: str, date_str: str, days: int) 
             });
             return results;
         }
-    """)
+    """
+
+    # Loop: panen kartu terlihat → scroll turun → ulangi sampai tak ada yang baru
+    collected: dict = {}
+    pos = 0
+    stagnant = 0
+    for _ in range(150):   # batas aman agar tidak loop selamanya
+        batch = await page.evaluate(parse_js)
+        before = len(collected)
+        for f in batch:
+            key = (f["airline"], f["depTime"], f["arrTime"],
+                   f["depCode"], f["arrCode"], f["price"])
+            collected[key] = f
+        stagnant = stagnant + 1 if len(collected) == before else 0
+        height = await page.evaluate("() => document.body.scrollHeight")
+        if stagnant >= 8 or pos > height + 3000:
+            break
+        pos += 500
+        await page.evaluate("(y) => window.scrollTo(0, y)", pos)
+        await page.wait_for_timeout(350)
+
+    flights = list(collected.values())
 
     today_str = datetime.now().strftime("%Y-%m-%d")
     now_str   = datetime.now().strftime("%H:%M:%S")

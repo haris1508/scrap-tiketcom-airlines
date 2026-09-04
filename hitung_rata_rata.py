@@ -181,6 +181,8 @@ with pd.ExcelWriter(excel_path, engine="openpyxl") as w:
     rpkm_bulan.to_excel(w, sheet_name="Rp per km per Bulan", index=False)
 
 long_avg.to_csv(csv_path, index=False, encoding="utf-8-sig")
+rpkm_csv = DIR / f"{ts}-Rp per km per Bulan.csv"
+rpkm_bulan.to_csv(rpkm_csv, index=False, encoding="utf-8-sig")
 
 print(f"\n📊 Pivot tabel (Rp):")
 print(pivot.to_string())
